@@ -1,7 +1,7 @@
 """
 Full feature engineering pipeline.
 
-Takes the merged football-data + understat DataFrame, computes Elo / xG-Elo
+Takes the merged football-data + understat xG DataFrame, computes Elo / xG-Elo
 ratings, then builds all match-level features. All features are strictly
 pre-match (no leakage).
 
@@ -221,7 +221,7 @@ def build_features(
     Main entry point. Merges data sources, computes all features, returns
     a clean feature DataFrame.
     """
-    logger.info("Merging football-data and understat...")
+    logger.info("Merging football-data and understat xG...")
     df = _merge_xg(fd_df, us_df)
 
     logger.info("Computing Elo ratings...")
@@ -304,14 +304,14 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     from src.collect.football_data import load_cached as load_fd
-    from src.collect.understat import load_cached as load_us
+    from src.collect.understat import download_all as download_us
 
     try:
         fd_df = load_fd()
-        us_df = load_us()
-    except FileNotFoundError as e:
+        us_df = download_us()
+    except Exception as e:
         print(f"Error: {e}")
-        print("Run src/collect/football_data.py and src/collect/understat.py first.")
+        print("Run src/collect/football_data.py first; set SCRAPERAPI_KEY for understat on CI.")
         sys.exit(1)
 
     features = build_features(fd_df, us_df)

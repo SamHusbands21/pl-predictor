@@ -13,8 +13,9 @@ build/
 data/raw/football_data/
 # Processed features are rebuilt each run
 data/processed/
-# Understat xG JSONs ARE committed (understat.com blocks CI IPs)
-# data/raw/understat/ — tracked
+# Understat xG JSONs ARE committed as a warm cache for historical seasons.
+# CI fetches missing/current-season data via ScraperAPI (SCRAPERAPI_KEY secret).
+# data/raw/understat/ — intentionally tracked
 
 # Model artefacts — kept in repo so live pipeline doesn't need to retrain
 # models/*.pkl

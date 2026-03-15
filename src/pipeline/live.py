@@ -2,8 +2,8 @@
 Daily live pipeline entrypoint.
 
 Steps:
-  1. Load latest historical data (cached CSVs + understat JSON)
-  2. Download any new completed match results from football-data.co.uk
+  1. Download latest historical results from football-data.co.uk
+  2. Download/refresh understat xG data (current season always re-fetched via ScraperAPI)
   3. Rebuild ELO / xG-ELO ratings up to today
   4. Load trained models
   5. Fetch upcoming EPL fixtures + current odds from Betfair Exchange
@@ -34,7 +34,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.collect.betfair import get_upcoming_epl_fixtures
 from src.collect.football_data import download_all as download_fd
-from src.collect.understat import load_cached as load_us
+from src.collect.understat import download_all as download_us
 from src.features.elo import EloSystem
 from src.features.xg_elo import XgEloSystem
 from src.features.engineer import MODEL_FEATURES, _rolling_team_stats, _h2h_win_rate
@@ -191,10 +191,12 @@ def run_pipeline(days_ahead: int = 7) -> None:
 
     logger.info("Loading historical data...")
     hist_df = download_fd()  # downloads any missing seasons, uses cache otherwise
+
+    logger.info("Fetching understat xG data (current season refreshed)...")
     try:
-        xg_df = load_us()
-    except FileNotFoundError:
-        logger.warning("No understat cache found; xG-Elo will use zeros. Run understat.py first.")
+        xg_df = download_us(force_current=True)
+    except Exception as exc:
+        logger.warning(f"Understat xG fetch failed ({exc}); xG-Elo will use zeros.")
         xg_df = pd.DataFrame(columns=["date", "home_team", "away_team", "xg_home", "xg_away"])
 
     logger.info("Building current Elo ratings...")

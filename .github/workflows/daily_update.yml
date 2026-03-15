@@ -33,32 +33,39 @@ jobs:
           echo "${{ secrets.BETFAIR_CERT }}" > certs/client-2048.crt
           echo "${{ secrets.BETFAIR_KEY }}"  > certs/client-2048.key
 
-      # Cache raw data + processed features + trained models
-      # Cache key includes requirements.txt hash so models retrain when sklearn version changes
-      # Weekly date key ensures models retrain weekly to pick up new match data
+      - name: Get current week (for cache key)
+        id: date
+        run: echo "week=$(date +'%Y-W%V')" >> $GITHUB_OUTPUT
+
+      # Cache downloaded football-data CSVs, processed features, and trained models.
+      # Understat JSONs are committed to the repo (no need to cache them).
+      # Cache key rotates weekly to retrain models on fresh data.
       - name: Restore data and model cache
         id: cache-data
         uses: actions/cache@v4
         with:
           path: |
             data/raw/football_data
-            data/raw/understat
             data/processed
             models/xgb_model.joblib
             models/rf_model.joblib
           key: pl-data-models-${{ runner.os }}-${{ hashFiles('requirements.txt') }}-${{ steps.date.outputs.week }}
 
-      - name: Get current week (for cache key)
-        id: date
-        run: echo "week=$(date +'%Y-W%V')" >> $GITHUB_OUTPUT
-
+      # Always collect latest football-data results (fast, incremental, no auth needed)
       - name: Collect historical football data
-        if: steps.cache-data.outputs.cache-hit != 'true'
         run: python -m src.collect.football_data
 
-      # Understat xG data is committed to the repo (understat.com blocks CI IPs)
-      # To update it, run python -m src.collect.understat locally and commit the new JSONs
+      # Always refresh understat xG for the current season via ScraperAPI.
+      # Historical seasons are served from the committed JSON cache in data/raw/understat/.
+      # ScraperAPI routes through residential IPs that bypass understat's Azure IP block.
+      # Free tier (scraperapi.com): 5,000 credits/month; we use ~20/month.
+      - name: Refresh current-season understat xG
+        env:
+          SCRAPERAPI_KEY: ${{ secrets.SCRAPERAPI_KEY }}
+        run: python -m src.collect.understat
 
+      # Only rebuild features and retrain models on a weekly cache miss.
+      # The live pipeline always reloads the latest data for ELO / rolling stats.
       - name: Build features
         if: steps.cache-data.outputs.cache-hit != 'true'
         run: python -m src.features.engineer
@@ -74,6 +81,7 @@ jobs:
           BETFAIR_APP_KEY: ${{ secrets.BETFAIR_APP_KEY }}
           BETFAIR_CERT_PATH: certs/client-2048.crt
           BETFAIR_KEY_PATH: certs/client-2048.key
+          SCRAPERAPI_KEY: ${{ secrets.SCRAPERAPI_KEY }}
         run: python -m src.pipeline.live
 
       # Push recommendations.json into sam_website repo
