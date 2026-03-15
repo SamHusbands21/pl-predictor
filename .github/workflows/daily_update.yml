@@ -1,75 +1,20 @@
-name: Weekly Model Retrain
+name: CI (disabled - pipeline runs locally)
 
-# Live recommendations are now generated locally (run_daily.ps1) so that
-# Betfair API access works from a UK IP.
+# The full pipeline (Betfair odds, predictions, model training) runs on the
+# local machine via run_daily.ps1 and run_retrain.ps1 so that:
+#   - Betfair API works from a UK IP (no geo-restriction)
+#   - Models are trained on a more powerful local machine
+#   - No sklearn/Python version mismatches between CI and local
 #
-# This workflow handles the heavier, less-frequent tasks:
-#   - Downloading new historical match data
-#   - Retraining XGBoost / Random Forest on the full dataset
-#   - Refreshing the understat xG cache via ScraperAPI
-#
-# It runs weekly (Sunday 06:00 UTC) and can be triggered manually at any time.
+# This workflow exists only as a manual trigger for debugging.
+# It does nothing by default.
 
 on:
-  schedule:
-    - cron: "0 6 * * 0"   # Every Sunday at 06:00 UTC
   workflow_dispatch:
 
 jobs:
-  retrain:
+  placeholder:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout pl-predictor
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: "pip"
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Get current week (for cache key)
-        id: date
-        run: echo "week=$(date +'%Y-W%V')" >> $GITHUB_OUTPUT
-
-      - name: Restore data cache
-        id: cache-data
-        uses: actions/cache@v4
-        with:
-          path: |
-            data/raw/football_data
-            data/processed
-            models/xgb_model.joblib
-            models/rf_model.joblib
-          key: pl-data-models-${{ runner.os }}-${{ hashFiles('requirements.txt') }}-${{ steps.date.outputs.week }}
-
-      - name: Collect historical football data
-        run: python -m src.collect.football_data
-
-      # Refresh current-season understat xG via ScraperAPI.
-      # Historical seasons are served from the committed JSONs in data/raw/understat/.
-      - name: Refresh current-season understat xG
-        env:
-          SCRAPERAPI_KEY: ${{ secrets.SCRAPERAPI_KEY }}
-        run: python -m src.collect.understat
-
-      - name: Build features
-        run: python -m src.features.engineer
-
-      - name: Train models
-        run: python -m src.models.train
-
-      # Commit any updated model artefacts or understat JSON back to the repo
-      - name: Commit updated models and data
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add models/ data/raw/understat/
-          git diff --cached --quiet || git commit -m "chore: weekly model retrain [$(date -u '+%Y-%m-%d')]"
-          git push
+      - name: No-op
+        run: echo "Pipeline runs locally. See run_daily.ps1 and run_retrain.ps1."
