@@ -164,6 +164,75 @@ def get_upcoming_epl_fixtures(days_ahead: int = 7) -> list[dict]:
     return fixtures
 
 
+def get_upcoming_fixtures_fotmob(days_ahead: int = 7) -> list[dict]:
+    """
+    Fallback fixture source using the Fotmob public API.
+
+    Returns upcoming EPL fixtures in the same format as get_upcoming_epl_fixtures()
+    but without odds (betfair_odds values are None).  Used when Betfair login
+    fails due to geographic restriction from CI runners.
+
+    Fotmob league ID 47 = Premier League.
+    """
+    import requests
+
+    FOTMOB_TEAM_MAP: dict[str, str] = {
+        "Man Utd":       "Man United",
+        "Sheffield Utd": "Sheffield United",
+    }
+
+    try:
+        resp = requests.get(
+            "https://www.fotmob.com/api/leagues",
+            params={"id": 47, "ccode3": "GBR"},
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+            timeout=20,
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.error(f"Fotmob API request failed: {exc}")
+        return []
+
+    data = resp.json()
+    all_matches = data.get("fixtures", {}).get("allMatches", [])
+
+    now = datetime.now(timezone.utc)
+    cutoff = now + timedelta(days=days_ahead)
+    fixtures = []
+
+    for m in all_matches:
+        status = m.get("status", {})
+        if status.get("finished") or status.get("cancelled"):
+            continue
+        utc_time = status.get("utcTime")
+        if not utc_time:
+            continue
+        try:
+            match_time = datetime.fromisoformat(utc_time.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if match_time <= now or match_time > cutoff:
+            continue
+
+        home_short = m.get("home", {}).get("shortName", "")
+        away_short = m.get("away", {}).get("shortName", "")
+        home = FOTMOB_TEAM_MAP.get(home_short, home_short)
+        away = FOTMOB_TEAM_MAP.get(away_short, away_short)
+        if not home or not away:
+            continue
+
+        fixtures.append({
+            "home": home,
+            "away": away,
+            "date": match_time,
+            "betfair_odds": {"home": None, "draw": None, "away": None},
+        })
+        logger.info(f"  [Fotmob] {home} vs {away} on {match_time.date()}")
+
+    logger.info(f"Fotmob: {len(fixtures)} upcoming fixtures in next {days_ahead} days")
+    return fixtures
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     fixtures = get_upcoming_epl_fixtures(days_ahead=7)
