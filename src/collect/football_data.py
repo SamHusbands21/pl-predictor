@@ -24,7 +24,7 @@ BASE_URL = "https://www.football-data.co.uk/mmz4281"
 # Season codes: football-data.co.uk uses YYZZ format e.g. 1415 for 2014/15
 SEASONS = [
     "1415", "1516", "1617", "1718", "1819",
-    "1920", "2021", "2122", "2223", "2324", "2425",
+    "1920", "2021", "2122", "2223", "2324", "2425", "2526",
 ]
 
 COLS_KEEP = [
