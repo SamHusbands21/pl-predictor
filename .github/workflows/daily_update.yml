@@ -1,0 +1,77 @@
+name: Daily Betting Update
+
+on:
+  schedule:
+    # Run at 08:00 UTC every day
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+    # Allow manual trigger from GitHub Actions UI
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout pl-predictor
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Write Betfair SSL certificates from GitHub Secrets to the certs/ directory
+      - name: Write Betfair certificates
+        run: |
+          mkdir -p certs
+          echo "${{ secrets.BETFAIR_CERT }}" > certs/client-2048.crt
+          echo "${{ secrets.BETFAIR_KEY }}"  > certs/client-2048.key
+
+      - name: Restore cached historical data
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/raw/football_data
+            data/raw/understat
+            data/processed
+            models
+          key: pl-predictor-data-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            pl-predictor-data-${{ runner.os }}-
+
+      - name: Run live pipeline
+        env:
+          BETFAIR_USERNAME: ${{ secrets.BETFAIR_USERNAME }}
+          BETFAIR_PASSWORD: ${{ secrets.BETFAIR_PASSWORD }}
+          BETFAIR_APP_KEY: ${{ secrets.BETFAIR_APP_KEY }}
+          BETFAIR_CERT_PATH: certs/client-2048.crt
+          BETFAIR_KEY_PATH: certs/client-2048.key
+        run: python -m src.pipeline.live
+
+      # Push recommendations.json into sam_website repo
+      - name: Checkout sam_website
+        uses: actions/checkout@v4
+        with:
+          repository: SamHusbands21/sam_website
+          token: ${{ secrets.SAM_WEBSITE_TOKEN }}
+          path: sam_website
+
+      - name: Copy recommendations to sam_website
+        run: |
+          mkdir -p sam_website/data
+          cp output/recommendations.json sam_website/data/recommendations.json
+
+      - name: Commit and push to sam_website
+        working-directory: sam_website
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/recommendations.json
+          git diff --cached --quiet || git commit -m "chore: update betting recommendations [$(date -u '+%Y-%m-%d')]"
+          git push
