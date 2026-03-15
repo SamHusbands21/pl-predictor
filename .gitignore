@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Data — raw and processed data files are not committed
+data/raw/
+data/processed/
+
+# Model artefacts — kept in repo so live pipeline doesn't need to retrain
+# models/*.pkl
+# models/*.joblib
+
+# Secrets
+.env
+*.crt
+*.key
+*.pem
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# OS
+.DS_Store
+Thumbs.db
+
+# output/ is committed — recommendations.json is read by the website

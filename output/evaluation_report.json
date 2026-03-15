@@ -1,0 +1,51 @@
+{
+  "test_set": {
+    "n_matches": 1140,
+    "seasons": [
+      "2022/2023",
+      "2023/2024",
+      "2024/2025"
+    ]
+  },
+  "classification": {
+    "log_loss": 0.9734,
+    "brier_score": 0.1923,
+    "accuracy": 0.55,
+    "confusion_matrix": [
+      [
+        403,
+        11,
+        100
+      ],
+      [
+        156,
+        4,
+        102
+      ],
+      [
+        140,
+        4,
+        220
+      ]
+    ]
+  },
+  "profitability": {
+    "ev_threshold": 1.05,
+    "model": {
+      "label": "Model value bets",
+      "n_bets": 1058,
+      "win_rate_pct": 29.7,
+      "flat_roi_pct": -10.95,
+      "flat_total_pnl": -115.85,
+      "kelly_total_pnl": -10.8123,
+      "kelly_sharpe": -2.232
+    },
+    "baseline_favourite": {
+      "label": "Always-favourite baseline",
+      "n_bets": 1140,
+      "win_rate_pct": 56.7,
+      "flat_roi_pct": 0.47,
+      "flat_total_pnl": 5.34
+    }
+  }
+}
