@@ -56,9 +56,8 @@ jobs:
         if: steps.cache-data.outputs.cache-hit != 'true'
         run: python -m src.collect.football_data
 
-      - name: Collect understat xG data
-        if: steps.cache-data.outputs.cache-hit != 'true'
-        run: python -m src.collect.understat
+      # Understat xG data is committed to the repo (understat.com blocks CI IPs)
+      # To update it, run python -m src.collect.understat locally and commit the new JSONs
 
       - name: Build features
         if: steps.cache-data.outputs.cache-hit != 'true'

@@ -9,9 +9,12 @@ env/
 dist/
 build/
 
-# Data — raw and processed data files are not committed
-data/raw/
+# Raw football-data CSVs are re-downloaded each run
+data/raw/football_data/
+# Processed features are rebuilt each run
 data/processed/
+# Understat xG JSONs ARE committed (understat.com blocks CI IPs)
+# data/raw/understat/ — tracked
 
 # Model artefacts — kept in repo so live pipeline doesn't need to retrain
 # models/*.pkl
