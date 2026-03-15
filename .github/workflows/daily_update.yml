@@ -1,14 +1,22 @@
-name: Daily Betting Update
+name: Weekly Model Retrain
+
+# Live recommendations are now generated locally (run_daily.ps1) so that
+# Betfair API access works from a UK IP.
+#
+# This workflow handles the heavier, less-frequent tasks:
+#   - Downloading new historical match data
+#   - Retraining XGBoost / Random Forest on the full dataset
+#   - Refreshing the understat xG cache via ScraperAPI
+#
+# It runs weekly (Sunday 06:00 UTC) and can be triggered manually at any time.
 
 on:
   schedule:
-    # Run at 08:00 UTC every day
-    - cron: "0 8 * * *"
+    - cron: "0 6 * * 0"   # Every Sunday at 06:00 UTC
   workflow_dispatch:
-    # Allow manual trigger from GitHub Actions UI
 
 jobs:
-  update:
+  retrain:
     runs-on: ubuntu-latest
 
     steps:
@@ -26,21 +34,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # Write Betfair SSL certificates from GitHub Secrets to the certs/ directory
-      - name: Write Betfair certificates
-        run: |
-          mkdir -p certs
-          echo "${{ secrets.BETFAIR_CERT }}" > certs/client-2048.crt
-          echo "${{ secrets.BETFAIR_KEY }}"  > certs/client-2048.key
-
       - name: Get current week (for cache key)
         id: date
         run: echo "week=$(date +'%Y-W%V')" >> $GITHUB_OUTPUT
 
-      # Cache downloaded football-data CSVs, processed features, and trained models.
-      # Understat JSONs are committed to the repo (no need to cache them).
-      # Cache key rotates weekly to retrain models on fresh data.
-      - name: Restore data and model cache
+      - name: Restore data cache
         id: cache-data
         uses: actions/cache@v4
         with:
@@ -51,57 +49,27 @@ jobs:
             models/rf_model.joblib
           key: pl-data-models-${{ runner.os }}-${{ hashFiles('requirements.txt') }}-${{ steps.date.outputs.week }}
 
-      # Always collect latest football-data results (fast, incremental, no auth needed)
       - name: Collect historical football data
         run: python -m src.collect.football_data
 
-      # Always refresh understat xG for the current season via ScraperAPI.
-      # Historical seasons are served from the committed JSON cache in data/raw/understat/.
-      # ScraperAPI routes through residential IPs that bypass understat's Azure IP block.
-      # Free tier (scraperapi.com): 5,000 credits/month; we use ~20/month.
+      # Refresh current-season understat xG via ScraperAPI.
+      # Historical seasons are served from the committed JSONs in data/raw/understat/.
       - name: Refresh current-season understat xG
         env:
           SCRAPERAPI_KEY: ${{ secrets.SCRAPERAPI_KEY }}
         run: python -m src.collect.understat
 
-      # Only rebuild features and retrain models on a weekly cache miss.
-      # The live pipeline always reloads the latest data for ELO / rolling stats.
       - name: Build features
-        if: steps.cache-data.outputs.cache-hit != 'true'
         run: python -m src.features.engineer
 
       - name: Train models
-        if: steps.cache-data.outputs.cache-hit != 'true'
         run: python -m src.models.train
 
-      - name: Run live pipeline
-        env:
-          BETFAIR_USERNAME: ${{ secrets.BETFAIR_USERNAME }}
-          BETFAIR_PASSWORD: ${{ secrets.BETFAIR_PASSWORD }}
-          BETFAIR_APP_KEY: ${{ secrets.BETFAIR_APP_KEY }}
-          BETFAIR_CERT_PATH: certs/client-2048.crt
-          BETFAIR_KEY_PATH: certs/client-2048.key
-          SCRAPERAPI_KEY: ${{ secrets.SCRAPERAPI_KEY }}
-        run: python -m src.pipeline.live
-
-      # Push recommendations.json into sam_website repo
-      - name: Checkout sam_website
-        uses: actions/checkout@v4
-        with:
-          repository: SamHusbands21/SamHusbands21.github.io
-          token: ${{ secrets.SAM_WEBSITE_TOKEN }}
-          path: sam_website
-
-      - name: Copy recommendations to sam_website
-        run: |
-          mkdir -p sam_website/data
-          cp output/recommendations.json sam_website/data/recommendations.json
-
-      - name: Commit and push to sam_website
-        working-directory: sam_website
+      # Commit any updated model artefacts or understat JSON back to the repo
+      - name: Commit updated models and data
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/recommendations.json
-          git diff --cached --quiet || git commit -m "chore: update betting recommendations [$(date -u '+%Y-%m-%d')]"
+          git add models/ data/raw/understat/
+          git diff --cached --quiet || git commit -m "chore: weekly model retrain [$(date -u '+%Y-%m-%d')]"
           git push
