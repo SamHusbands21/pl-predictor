@@ -32,7 +32,7 @@ load_dotenv()
 ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(ROOT))
 
-from src.collect.betfair import get_upcoming_epl_fixtures
+from src.collect.betfair import get_upcoming_epl_fixtures, get_upcoming_fixtures_fotmob
 from src.collect.football_data import download_all as download_fd
 from src.collect.understat import download_all as download_us
 from src.features.elo import EloSystem
@@ -206,7 +206,14 @@ def run_pipeline(days_ahead: int = 7) -> None:
     xgb_model, rf_model = load_models()
 
     logger.info("Fetching upcoming fixtures from Betfair...")
-    fixtures = get_upcoming_epl_fixtures(days_ahead=days_ahead)
+    try:
+        fixtures = get_upcoming_epl_fixtures(days_ahead=days_ahead)
+    except Exception as exc:
+        logger.warning(
+            f"Betfair API unavailable ({exc}); "
+            "falling back to Fotmob for fixtures (odds will be unavailable)."
+        )
+        fixtures = get_upcoming_fixtures_fotmob(days_ahead=days_ahead)
 
     if not fixtures:
         logger.warning("No upcoming fixtures found. Writing empty recommendations.")
