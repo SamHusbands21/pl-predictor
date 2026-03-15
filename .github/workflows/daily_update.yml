@@ -33,17 +33,40 @@ jobs:
           echo "${{ secrets.BETFAIR_CERT }}" > certs/client-2048.crt
           echo "${{ secrets.BETFAIR_KEY }}"  > certs/client-2048.key
 
-      - name: Restore cached historical data
+      # Cache raw data + processed features + trained models
+      # Cache key includes requirements.txt hash so models retrain when sklearn version changes
+      # Weekly date key ensures models retrain weekly to pick up new match data
+      - name: Restore data and model cache
+        id: cache-data
         uses: actions/cache@v4
         with:
           path: |
             data/raw/football_data
             data/raw/understat
             data/processed
-            models
-          key: pl-predictor-data-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            pl-predictor-data-${{ runner.os }}-
+            models/xgb_model.joblib
+            models/rf_model.joblib
+          key: pl-data-models-${{ runner.os }}-${{ hashFiles('requirements.txt') }}-${{ steps.date.outputs.week }}
+
+      - name: Get current week (for cache key)
+        id: date
+        run: echo "week=$(date +'%Y-W%V')" >> $GITHUB_OUTPUT
+
+      - name: Collect historical football data
+        if: steps.cache-data.outputs.cache-hit != 'true'
+        run: python -m src.collect.football_data
+
+      - name: Collect understat xG data
+        if: steps.cache-data.outputs.cache-hit != 'true'
+        run: python -m src.collect.understat
+
+      - name: Build features
+        if: steps.cache-data.outputs.cache-hit != 'true'
+        run: python -m src.features.engineer
+
+      - name: Train models
+        if: steps.cache-data.outputs.cache-hit != 'true'
+        run: python -m src.models.train
 
       - name: Run live pipeline
         env:
