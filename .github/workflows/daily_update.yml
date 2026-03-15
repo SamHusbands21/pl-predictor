@@ -58,7 +58,7 @@ jobs:
       - name: Checkout sam_website
         uses: actions/checkout@v4
         with:
-          repository: SamHusbands21/sam_website
+          repository: SamHusbands21/SamHusbands21.github.io
           token: ${{ secrets.SAM_WEBSITE_TOKEN }}
           path: sam_website
 
