@@ -46,18 +46,20 @@ def _fetch_season(year: int, retries: int = 3) -> list[dict]:
             # Understat embeds data as: var datesData = JSON.parse('...');
             scripts = soup.find_all("script")
             for script in scripts:
-                if script.string and "datesData" in script.string:
-                    # Extract the JSON string from inside JSON.parse('...')
-                    match = re.search(
-                        r"datesData\s*=\s*JSON\.parse\('(.+?)'\)",
-                        script.string,
-                        re.DOTALL,
-                    )
-                    if match:
-                        raw = match.group(1)
-                        # Unescape the string
-                        raw = raw.encode("utf-8").decode("unicode_escape")
-                        return json.loads(raw)
+                if not script.string or "datesData" not in script.string:
+                    continue
+                # Understat embeds: var datesData = JSON.parse('...')
+                # The inner string uses \' for quotes and \uXXXX for unicode
+                match = re.search(
+                    r'datesData\s*=\s*JSON\.parse\(\'(.*?)\'\)',
+                    script.string,
+                    re.DOTALL,
+                )
+                if match:
+                    raw = match.group(1)
+                    # Fix escaped single quotes then let json.loads handle \uXXXX
+                    raw = raw.replace("\\'", "'")
+                    return json.loads(raw)
             logger.warning(f"  No datesData found for {year}")
             return []
         except Exception as exc:
