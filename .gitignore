@@ -36,3 +36,5 @@ data/processed/
 Thumbs.db
 
 # output/ is committed — recommendations.json is read by the website
+# Local pipeline logs
+logs/

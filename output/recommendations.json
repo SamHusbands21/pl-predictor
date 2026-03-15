@@ -1,25 +1,25 @@
 {
-  "updated_at": "2026-03-15T17:02:21.156713+00:00",
+  "updated_at": "2026-03-15T19:22:26.756222+00:00",
   "fixtures": [
     {
       "home": "Brentford",
       "away": "Wolves",
       "date": "2026-03-16T20:00:00+00:00",
       "model_probs": {
-        "home": 0.5754,
-        "draw": 0.2349,
-        "away": 0.1897
+        "home": 0.6292,
+        "draw": 0.1869,
+        "away": 0.1839
       },
       "betfair_odds": {
-        "home": 1.62,
-        "draw": 4.4,
+        "home": 1.61,
+        "draw": 4.5,
         "away": 6.2
       },
       "value_bets": [
         {
           "outcome": "away",
-          "ev": 1.1761,
-          "kelly_fraction": 0.0339
+          "ev": 1.1402,
+          "kelly_fraction": 0.027
         }
       ]
     },
@@ -28,19 +28,19 @@
       "away": "Man Utd",
       "date": "2026-03-20T20:00:00+00:00",
       "model_probs": {
-        "home": 0.5957,
-        "draw": 0.2041,
-        "away": 0.2002
+        "home": 0.6307,
+        "draw": 0.1997,
+        "away": 0.1696
       },
       "betfair_odds": {
-        "home": 3.25,
+        "home": 3.3,
         "draw": 3.8,
         "away": 2.26
       },
       "value_bets": [
         {
           "outcome": "home",
-          "ev": 1.936,
+          "ev": 2.0813,
           "kelly_fraction": 0.25
         }
       ]
@@ -50,20 +50,20 @@
       "away": "Liverpool",
       "date": "2026-03-21T12:30:00+00:00",
       "model_probs": {
-        "home": 0.3549,
-        "draw": 0.1997,
-        "away": 0.4454
+        "home": 0.3554,
+        "draw": 0.2144,
+        "away": 0.4303
       },
       "betfair_odds": {
-        "home": 3.1,
+        "home": 3.2,
         "draw": 3.75,
-        "away": 2.2
+        "away": 2.3
       },
       "value_bets": [
         {
           "outcome": "home",
-          "ev": 1.1002,
-          "kelly_fraction": 0.0477
+          "ev": 1.1373,
+          "kelly_fraction": 0.0624
         }
       ]
     },
@@ -72,20 +72,20 @@
       "away": "Burnley",
       "date": "2026-03-21T15:00:00+00:00",
       "model_probs": {
-        "home": 0.6274,
-        "draw": 0.1774,
-        "away": 0.1952
+        "home": 0.6696,
+        "draw": 0.1552,
+        "away": 0.1752
       },
       "betfair_odds": {
         "home": 1.54,
-        "draw": 4.2,
+        "draw": 4.3,
         "away": 6.8
       },
       "value_bets": [
         {
           "outcome": "away",
-          "ev": 1.3274,
-          "kelly_fraction": 0.0564
+          "ev": 1.1914,
+          "kelly_fraction": 0.033
         }
       ]
     },
@@ -94,20 +94,20 @@
       "away": "Chelsea",
       "date": "2026-03-21T17:30:00+00:00",
       "model_probs": {
-        "home": 0.2966,
-        "draw": 0.2949,
-        "away": 0.4085
+        "home": 0.5165,
+        "draw": 0.2033,
+        "away": 0.2802
       },
       "betfair_odds": {
-        "home": 3.4,
+        "home": 3.7,
         "draw": 3.8,
         "away": 2.08
       },
       "value_bets": [
         {
-          "outcome": "draw",
-          "ev": 1.1206,
-          "kelly_fraction": 0.0431
+          "outcome": "home",
+          "ev": 1.911,
+          "kelly_fraction": 0.25
         }
       ]
     },
@@ -116,20 +116,20 @@
       "away": "Brentford",
       "date": "2026-03-21T20:00:00+00:00",
       "model_probs": {
-        "home": 0.1948,
-        "draw": 0.2318,
-        "away": 0.5734
+        "home": 0.3188,
+        "draw": 0.2228,
+        "away": 0.4584
       },
       "betfair_odds": {
-        "home": 2.62,
+        "home": 2.68,
         "draw": 3.55,
         "away": 2.72
       },
       "value_bets": [
         {
           "outcome": "away",
-          "ev": 1.5596,
-          "kelly_fraction": 0.25
+          "ev": 1.2468,
+          "kelly_fraction": 0.1435
         }
       ]
     },
@@ -138,19 +138,19 @@
       "away": "Sunderland",
       "date": "2026-03-22T12:00:00+00:00",
       "model_probs": {
-        "home": 0.7197,
-        "draw": 0.1678,
-        "away": 0.1125
+        "home": 0.7326,
+        "draw": 0.1415,
+        "away": 0.1259
       },
       "betfair_odds": {
         "home": 1.67,
-        "draw": 4.2,
+        "draw": 4.3,
         "away": 5.6
       },
       "value_bets": [
         {
           "outcome": "home",
-          "ev": 1.2019,
+          "ev": 1.2234,
           "kelly_fraction": 0.25
         }
       ]
@@ -160,20 +160,20 @@
       "away": "Nottm Forest",
       "date": "2026-03-22T14:15:00+00:00",
       "model_probs": {
-        "home": 0.479,
-        "draw": 0.279,
-        "away": 0.242
+        "home": 0.5033,
+        "draw": 0.2692,
+        "away": 0.2274
       },
       "betfair_odds": {
-        "home": 2.62,
-        "draw": 3.65,
-        "away": 2.84
+        "home": 2.54,
+        "draw": 3.55,
+        "away": 2.98
       },
       "value_bets": [
         {
           "outcome": "home",
-          "ev": 1.255,
-          "kelly_fraction": 0.1574
+          "ev": 1.2784,
+          "kelly_fraction": 0.1808
         }
       ]
     },
@@ -182,20 +182,20 @@
       "away": "West Ham",
       "date": "2026-03-22T14:15:00+00:00",
       "model_probs": {
-        "home": 0.6247,
-        "draw": 0.2271,
-        "away": 0.1482
+        "home": 0.6438,
+        "draw": 0.1743,
+        "away": 0.1819
       },
       "betfair_odds": {
-        "home": 1.97,
+        "home": 1.98,
         "draw": 3.8,
         "away": 3.95
       },
       "value_bets": [
         {
           "outcome": "home",
-          "ev": 1.2307,
-          "kelly_fraction": 0.2378
+          "ev": 1.2747,
+          "kelly_fraction": 0.25
         }
       ]
     }
