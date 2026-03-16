@@ -90,7 +90,7 @@ foreach ($f in $filesToCopy) {
         Copy-Item $src $dst
         Log "  Copied $($f.Src) -> $($f.Dst)"
     } else {
-        Log "  WARNING: $src not found — skipping"
+        Log "  WARNING: $src not found - skipping"
     }
 }
 
