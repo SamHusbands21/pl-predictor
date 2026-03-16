@@ -4,8 +4,10 @@ Evaluation of model performance on the held-out test set.
 Classification metrics:
   - Log loss (primary — penalises miscalibration)
   - Multi-class Brier score
+  - ROC-AUC (multiclass OVR, macro-averaged)
   - Accuracy
   - Confusion matrix
+  - Precision and recall per class (Home / Draw / Away)
   - Calibration reliability diagram (saved as PNG)
 
 Profitability metrics (using historical Betfair / Bet365 odds):
@@ -15,13 +17,21 @@ Profitability metrics (using historical Betfair / Bet365 odds):
   - Sharpe ratio of bet-level returns
   - Compared against naive strategies
 
-All results are printed to stdout and saved to output/evaluation_report.json.
+Feature importance:
+  - SHAP TreeExplainer on XGBoost model (saved as PNG)
+
+All results are saved to:
+  output/evaluation_report.json   — full detailed report
+  output/website_evaluation.json  — simplified schema for the project paper page
+  output/calibration.png
+  output/shap_summary.png
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 
 import matplotlib
@@ -33,6 +43,8 @@ from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
     log_loss,
+    precision_recall_fscore_support,
+    roc_auc_score,
 )
 
 from src.features.engineer import MODEL_FEATURES
@@ -43,6 +55,34 @@ logger = logging.getLogger(__name__)
 OUTPUT_DIR = Path(__file__).parents[2] / "output"
 EV_THRESHOLD = 1.05  # bet when model_prob × odds > this
 MAX_KELLY = 0.25     # cap Kelly fraction
+
+# Human-readable names for every model feature (used in SHAP plot labels)
+FEATURE_DISPLAY_NAMES: dict[str, str] = {
+    "elo_home":          "Home Elo rating",
+    "elo_away":          "Away Elo rating",
+    "elo_diff":          "Elo difference (Home − Away)",
+    "xg_elo_home":       "Home xG-Elo rating",
+    "xg_elo_away":       "Away xG-Elo rating",
+    "xg_elo_diff":       "xG-Elo difference (Home − Away)",
+    "home_ppg_5":        "Home pts/game (last 5)",
+    "home_ppg_10":       "Home pts/game (last 10)",
+    "away_ppg_5":        "Away pts/game (last 5)",
+    "away_ppg_10":       "Away pts/game (last 10)",
+    "home_xgf_5":        "Home xG for (last 5)",
+    "home_xga_5":        "Home xG against (last 5)",
+    "away_xgf_5":        "Away xG for (last 5)",
+    "away_xga_5":        "Away xG against (last 5)",
+    "home_gf_5":         "Home goals for (last 5)",
+    "home_ga_5":         "Home goals against (last 5)",
+    "away_gf_5":         "Away goals for (last 5)",
+    "away_ga_5":         "Away goals against (last 5)",
+    "home_days_rest":    "Home days since last match",
+    "away_days_rest":    "Away days since last match",
+    "h2h_home_win_rate": "H2H home win rate (last 5 meetings)",
+    "home_advantage":    "Home advantage",
+}
+
+DISPLAY_NAMES = [FEATURE_DISPLAY_NAMES.get(f, f) for f in MODEL_FEATURES]
 
 
 def _brier_multiclass(y_true: np.ndarray, proba: np.ndarray) -> float:
@@ -93,6 +133,55 @@ def _calibration_diagram(
     plt.savefig(path, dpi=120, bbox_inches="tight")
     plt.close()
     logger.info(f"Calibration diagram saved to {path}")
+
+
+def _shap_summary_plot(
+    xgb_model,
+    X_test: np.ndarray,
+    save_path: Path | None = None,
+) -> None:
+    """
+    Compute SHAP values for the XGBoost model and save a horizontal bar chart
+    showing mean absolute SHAP importance averaged across all three outcome classes.
+    """
+    try:
+        import shap
+    except ImportError:
+        logger.warning("shap not installed — skipping SHAP plot. Run: pip install shap")
+        return
+
+    logger.info("Computing SHAP values (this may take a moment)...")
+    explainer = shap.TreeExplainer(xgb_model)
+    shap_values = explainer.shap_values(X_test)
+
+    # shap_values: list of [n_samples, n_features] per class, or 3-D array
+    if isinstance(shap_values, list):
+        mean_abs = np.mean([np.abs(sv).mean(axis=0) for sv in shap_values], axis=0)
+    else:
+        # Shape: (n_samples, n_features, n_classes)
+        mean_abs = np.abs(shap_values).mean(axis=(0, 2))
+
+    order = np.argsort(mean_abs)
+    ordered_names = [DISPLAY_NAMES[i] for i in order]
+    ordered_vals  = mean_abs[order]
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+    y_pos = np.arange(len(ordered_names))
+    bars = ax.barh(y_pos, ordered_vals, color="#6cabdd", edgecolor="none", height=0.65)
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(ordered_names, fontsize=9)
+    ax.set_xlabel("Mean |SHAP value| — averaged across Home / Draw / Away", fontsize=9)
+    ax.set_title("Feature Importance (XGBoost — SHAP)", fontsize=11, fontweight="bold")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.tick_params(axis="x", labelsize=8)
+    plt.tight_layout()
+
+    path = save_path or OUTPUT_DIR / "shap_summary.png"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(path, dpi=120, bbox_inches="tight", facecolor="white")
+    plt.close()
+    logger.info(f"SHAP summary plot saved to {path}")
 
 
 def _value_bets(
@@ -202,18 +291,27 @@ def run_evaluation(
     proba = _ensemble_proba(xgb_model, rf_model, X_test)
 
     # --- Classification metrics ---
-    ll = log_loss(y_test, proba)
-    brier = _brier_multiclass(y_test, proba)
-    acc = accuracy_score(y_test, proba.argmax(axis=1))
-    cm = confusion_matrix(y_test, proba.argmax(axis=1))
+    ll      = log_loss(y_test, proba)
+    brier   = _brier_multiclass(y_test, proba)
+    roc_auc = roc_auc_score(y_test, proba, multi_class="ovr", average="macro")
+    acc     = accuracy_score(y_test, proba.argmax(axis=1))
+    cm      = confusion_matrix(y_test, proba.argmax(axis=1))
+
+    precision, recall, _, _ = precision_recall_fscore_support(
+        y_test, proba.argmax(axis=1), labels=[0, 1, 2], zero_division=0
+    )
 
     logger.info(f"\n=== Classification (test set: {len(test_df)} matches) ===")
     logger.info(f"  Log loss:    {ll:.4f}")
     logger.info(f"  Brier score: {brier:.4f}")
+    logger.info(f"  ROC-AUC:     {roc_auc:.4f}  (multiclass OVR, macro)")
     logger.info(f"  Accuracy:    {acc:.4f}")
+    logger.info(f"  Precision — Home: {precision[0]:.3f}  Draw: {precision[1]:.3f}  Away: {precision[2]:.3f}")
+    logger.info(f"  Recall    — Home: {recall[0]:.3f}  Draw: {recall[1]:.3f}  Away: {recall[2]:.3f}")
     logger.info(f"  Confusion matrix:\n{cm}")
 
     _calibration_diagram(y_test, proba, save_path=OUTPUT_DIR / "calibration.png")
+    _shap_summary_plot(xgb_model, X_test, save_path=OUTPUT_DIR / "shap_summary.png")
 
     # --- Profitability ---
     odds_h = test_df["odds_home"].values.astype(float)
@@ -239,7 +337,18 @@ def run_evaluation(
         "classification": {
             "log_loss": round(ll, 4),
             "brier_score": round(brier, 4),
+            "roc_auc": round(roc_auc, 4),
             "accuracy": round(acc, 4),
+            "precision": {
+                "home": round(float(precision[0]), 4),
+                "draw": round(float(precision[1]), 4),
+                "away": round(float(precision[2]), 4),
+            },
+            "recall": {
+                "home": round(float(recall[0]), 4),
+                "draw": round(float(recall[1]), 4),
+                "away": round(float(recall[2]), 4),
+            },
             "confusion_matrix": cm.tolist(),
         },
         "profitability": {
@@ -254,7 +363,57 @@ def run_evaluation(
         json.dump(report, f, indent=2)
     logger.info(f"\nReport saved to {report_path}")
 
+    # Write simplified schema consumed by the website project paper page
+    _write_website_json(report)
+
     return report
+
+
+def _write_website_json(report: dict) -> None:
+    """
+    Write a simplified evaluation.json in the schema expected by betting-paper.html.
+    Saved to output/website_evaluation.json; the retrain script copies it to the
+    website's data/ folder.
+    """
+    seasons_list = report["test_set"]["seasons"]
+    # Format as "2022/23–2024/25" regardless of how seasons are stored
+    def _short(s: str) -> str:
+        parts = s.split("/")
+        return f"{parts[0]}/{parts[1][-2:]}" if len(parts) == 2 else s
+
+    if seasons_list:
+        seasons_str = f"{_short(seasons_list[0])}–{_short(seasons_list[-1])}"
+    else:
+        seasons_str = "unknown"
+
+    clf = report["classification"]
+    prof = report["profitability"]["model"]
+
+    website_json = {
+        "_note": "Generated by src/models/evaluate.py. Do not edit manually.",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "test_seasons": seasons_str,
+        "n_test_matches": report["test_set"]["n_matches"],
+        "roc_auc": clf.get("roc_auc"),
+        "brier_score": clf.get("brier_score"),
+        "log_loss": clf.get("log_loss"),
+        "accuracy": clf.get("accuracy"),
+        "precision": clf.get("precision", {"home": None, "draw": None, "away": None}),
+        "recall":    clf.get("recall",    {"home": None, "draw": None, "away": None}),
+        "gambling": {
+            "value_bet_threshold": report["profitability"]["ev_threshold"],
+            "flat_roi_pct": prof.get("flat_roi_pct"),
+            "flat_bets":    prof.get("n_bets"),
+            "flat_pnl":     prof.get("flat_total_pnl"),
+            "kelly_pnl":    prof.get("kelly_total_pnl"),
+            "sharpe_ratio": prof.get("kelly_sharpe"),
+        },
+    }
+
+    path = OUTPUT_DIR / "website_evaluation.json"
+    with open(path, "w") as f:
+        json.dump(website_json, f, indent=2)
+    logger.info(f"Website evaluation JSON saved to {path}")
 
 
 if __name__ == "__main__":
