@@ -76,6 +76,8 @@ $date = Get-Date -Format "yyyy-MM-dd"
 $filesToCopy = @(
     @{ Src = "output\calibration.png";         Dst = "data\calibration.png" },
     @{ Src = "output\shap_summary.png";        Dst = "data\shap_summary.png" },
+    @{ Src = "output\pnl_curve.png";           Dst = "data\pnl_curve.png" },
+    @{ Src = "output\threshold_sweep.png";     Dst = "data\threshold_sweep.png" },
     @{ Src = "output\website_evaluation.json"; Dst = "data\evaluation.json" }
 )
 foreach ($f in $filesToCopy) {
@@ -91,7 +93,7 @@ foreach ($f in $filesToCopy) {
 }
 
 Set-Location $SITE_DIR
-git add "data\calibration.png" "data\shap_summary.png" "data\evaluation.json"
+git add "data\calibration.png" "data\shap_summary.png" "data\pnl_curve.png" "data\threshold_sweep.png" "data\evaluation.json"
 $siteDiff = git diff --cached --name-only
 if ($siteDiff) {
     git commit -m "chore: update evaluation artefacts [$date]"
