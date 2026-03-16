@@ -25,7 +25,7 @@ Set-Location $PL_DIR
 Log "=== Full retrain started ==="
 
 # --- Step 1: Download latest football-data results ---
-Log "Step 1/4  Downloading latest match data..."
+Log "Step 1/6  Downloading latest match data..."
 $ErrorActionPreference = "Continue"
 & $PYTHON -m src.collect.football_data
 $ec = $LASTEXITCODE
@@ -34,7 +34,7 @@ if ($ec -ne 0) { Log "ERROR: football_data failed"; exit 1 }
 Log "Football data done."
 
 # --- Step 2: Refresh understat xG (all seasons) ---
-Log "Step 2/4  Refreshing understat xG data..."
+Log "Step 2/6  Refreshing understat xG data..."
 $ErrorActionPreference = "Continue"
 & $PYTHON -m src.collect.understat
 $ec = $LASTEXITCODE
@@ -43,7 +43,7 @@ if ($ec -ne 0) { Log "WARNING: understat fetch had issues (continuing with cache
 Log "Understat done."
 
 # --- Step 3: Rebuild features ---
-Log "Step 3/4  Building feature matrix..."
+Log "Step 3/6  Building feature matrix..."
 $ErrorActionPreference = "Continue"
 & $PYTHON -m src.features.engineer
 $ec = $LASTEXITCODE
@@ -85,7 +85,9 @@ foreach ($f in $filesToCopy) {
     $dst = Join-Path $SITE_DIR $f.Dst
     if (Test-Path $src) {
         New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
-        Copy-Item $src $dst -Force
+        # Remove destination first to avoid Windows file-lock errors on PNGs
+        if (Test-Path $dst) { Remove-Item $dst -Force -ErrorAction SilentlyContinue }
+        Copy-Item $src $dst
         Log "  Copied $($f.Src) -> $($f.Dst)"
     } else {
         Log "  WARNING: $src not found — skipping"
