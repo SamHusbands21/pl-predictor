@@ -43,7 +43,8 @@ from src.models.train import load_models, _ensemble_proba
 logger = logging.getLogger(__name__)
 
 OUTPUT_DIR = ROOT / "output"
-EV_THRESHOLD = 1.05
+EV_THRESHOLD = 1.25          # only flag bets with strong positive expected value
+ALLOWED_OUTCOMES = {"home", "away"}  # draw excluded — model's draw recall is near-zero
 MAX_KELLY = 0.25
 
 
@@ -166,10 +167,11 @@ def _value_bets_for_fixture(
     model_probs: dict,
     betfair_odds: dict,
 ) -> list[dict]:
-    """Return list of value bets for a fixture."""
-    outcomes = ["home", "draw", "away"]
+    """Return list of value bets for a fixture, filtered to ALLOWED_OUTCOMES."""
     bets = []
-    for outcome in outcomes:
+    for outcome in ["home", "draw", "away"]:
+        if outcome not in ALLOWED_OUTCOMES:
+            continue
         p = model_probs.get(outcome, 0.0)
         o = betfair_odds.get(outcome)
         if o is None or o <= 1.0 or p <= 0:

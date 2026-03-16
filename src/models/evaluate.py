@@ -53,8 +53,9 @@ from src.models.train import TEST_SEASONS, _load_features, _split, _ensemble_pro
 logger = logging.getLogger(__name__)
 
 OUTPUT_DIR = Path(__file__).parents[2] / "output"
-EV_THRESHOLD = 1.05  # bet when model_prob × odds > this
-MAX_KELLY = 0.25     # cap Kelly fraction
+EV_THRESHOLD = 1.25          # bet when model_prob × odds > this
+ALLOWED_OUTCOMES = {"home", "away"}  # draw excluded — near-zero recall destroys ROI
+MAX_KELLY = 0.25             # cap Kelly fraction
 
 # Human-readable names for every model feature (used in SHAP plot labels)
 FEATURE_DISPLAY_NAMES: dict[str, str] = {
@@ -276,6 +277,171 @@ def _naive_baseline_roi(
     }
 
 
+def _threshold_sweep(
+    proba: np.ndarray,
+    odds_h: np.ndarray,
+    odds_d: np.ndarray,
+    odds_a: np.ndarray,
+    y_test: np.ndarray,
+    thresholds: list[float] | None = None,
+    outcomes: list[str] | None = None,
+) -> list[dict]:
+    """
+    Compute flat ROI and bet count at each EV threshold.
+
+    Parameters
+    ----------
+    outcomes : None = all three; or e.g. ['home', 'away'] to exclude draws.
+    """
+    if thresholds is None:
+        thresholds = [round(1.00 + i * 0.05, 2) for i in range(1, 11)]  # 1.05 – 1.50
+
+    # Pull every bet that has any EV > 1.0 so we can filter cheaply in the loop
+    all_bets = _value_bets(proba, odds_h, odds_d, odds_a, y_test, threshold=1.0)
+    if outcomes is not None:
+        all_bets = all_bets[all_bets["outcome"].isin(outcomes)]
+
+    rows = []
+    for t in thresholds:
+        bets = all_bets[all_bets["ev"] >= t]
+        if len(bets) == 0:
+            rows.append({"ev_threshold": t, "n_bets": 0,
+                         "flat_roi_pct": None, "flat_pnl": None,
+                         "win_rate_pct": None, "kelly_sharpe": None})
+            continue
+        flat_returns  = bets["flat_return"].values
+        kelly_returns = bets["kelly_return"].values
+        n = len(bets)
+        kelly_sharpe = (
+            kelly_returns.mean() / (kelly_returns.std() + 1e-9) * np.sqrt(n)
+        )
+        rows.append({
+            "ev_threshold":  t,
+            "n_bets":        n,
+            "flat_roi_pct":  round(float(flat_returns.sum() / n * 100), 2),
+            "flat_pnl":      round(float(flat_returns.sum()), 2),
+            "win_rate_pct":  round(float(bets["won"].mean() * 100), 1),
+            "kelly_sharpe":  round(float(kelly_sharpe), 3),
+        })
+    return rows
+
+
+def _sweep_plot(
+    all_rows: list[dict],
+    ha_rows: list[dict],
+    save_path: Path,
+) -> None:
+    """Two-panel plot: ROI vs threshold and bet volume vs threshold."""
+    thresholds = [r["ev_threshold"] for r in all_rows]
+
+    def _vals(rows, key):
+        return [r.get(key) for r in rows]
+
+    roi_all  = _vals(all_rows, "flat_roi_pct")
+    roi_ha   = _vals(ha_rows,  "flat_roi_pct")
+    n_all    = _vals(all_rows, "n_bets")
+    n_ha     = _vals(ha_rows,  "n_bets")
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    fig.suptitle("EV Threshold Sweep — Test Set (2022/23–2024/25)", fontsize=12,
+                 fontweight="bold")
+
+    # --- ROI panel ---
+    ax1.axhline(0, color="grey", linestyle="--", linewidth=0.8, alpha=0.6)
+    ax1.plot(thresholds, roi_all, "o-", color="#6cabdd", linewidth=2,
+             markersize=6, label="All outcomes")
+    ax1.plot(thresholds, roi_ha,  "s-", color="#e07b54", linewidth=2,
+             markersize=6, label="Home & Away only")
+    ax1.set_xlabel("EV threshold", fontsize=9)
+    ax1.set_ylabel("Flat ROI (%)", fontsize=9)
+    ax1.set_title("ROI vs EV threshold", fontsize=10)
+    ax1.legend(fontsize=8)
+    ax1.spines["top"].set_visible(False)
+    ax1.spines["right"].set_visible(False)
+    ax1.tick_params(labelsize=8)
+
+    # --- Volume panel ---
+    ax2.plot(thresholds, n_all, "o-", color="#6cabdd", linewidth=2,
+             markersize=6, label="All outcomes")
+    ax2.plot(thresholds, n_ha,  "s-", color="#e07b54", linewidth=2,
+             markersize=6, label="Home & Away only")
+    ax2.set_xlabel("EV threshold", fontsize=9)
+    ax2.set_ylabel("Number of bets", fontsize=9)
+    ax2.set_title("Bet volume vs EV threshold", fontsize=10)
+    ax2.legend(fontsize=8)
+    ax2.spines["top"].set_visible(False)
+    ax2.spines["right"].set_visible(False)
+    ax2.tick_params(labelsize=8)
+
+    plt.tight_layout()
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, dpi=120, bbox_inches="tight", facecolor="white")
+    plt.close()
+    logger.info(f"Threshold sweep plot saved to {save_path}")
+
+
+def _pnl_curve_plot(
+    bets: pd.DataFrame,
+    test_df: pd.DataFrame,
+    save_path: Path,
+) -> None:
+    """
+    Plot cumulative flat P&L over time for the filtered strategy.
+    bets rows have match_idx aligned to test_df's integer index.
+    """
+    if len(bets) == 0:
+        logger.warning("No bets for P&L curve — skipping plot.")
+        return
+
+    # Attach date to each bet via match_idx
+    idx_to_date = test_df["date"].reset_index(drop=True)
+    bets = bets.copy()
+    bets["date"] = bets["match_idx"].map(idx_to_date)
+    bets = bets.sort_values("date").reset_index(drop=True)
+    bets["cum_pnl"] = bets["flat_return"].cumsum()
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.axhline(0, color="grey", linestyle="--", linewidth=0.8, alpha=0.6)
+
+    # Shade positive/negative regions
+    x = bets.index.values
+    y = bets["cum_pnl"].values
+    ax.fill_between(x, y, 0, where=(y >= 0), alpha=0.15, color="#16a34a", interpolate=True)
+    ax.fill_between(x, y, 0, where=(y <  0), alpha=0.15, color="#dc2626", interpolate=True)
+    ax.plot(x, y, color="#6cabdd", linewidth=2)
+
+    # Annotate final P&L
+    final = round(float(y[-1]), 2)
+    color = "#16a34a" if final >= 0 else "#dc2626"
+    sign = "+" if final >= 0 else ""
+    ax.annotate(
+        f"Final: {sign}{final} units",
+        xy=(x[-1], y[-1]),
+        xytext=(-10, 12),
+        textcoords="offset points",
+        fontsize=9,
+        color=color,
+        fontweight="bold",
+    )
+
+    ax.set_xlabel("Bet number (chronological)", fontsize=9)
+    ax.set_ylabel("Cumulative flat P&L (units)", fontsize=9)
+    ax.set_title(
+        f"Cumulative P&L — EV > {EV_THRESHOLD}, Home & Away only (test set 2022/23–2024/25)",
+        fontsize=10,
+        fontweight="bold",
+    )
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.tick_params(labelsize=8)
+    plt.tight_layout()
+
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, dpi=120, bbox_inches="tight", facecolor="white")
+    plt.close()
+    logger.info(f"P&L curve saved to {save_path}")
+
+
 def run_evaluation(
     xgb_model,
     rf_model,
@@ -313,14 +479,18 @@ def run_evaluation(
     _calibration_diagram(y_test, proba, save_path=OUTPUT_DIR / "calibration.png")
     _shap_summary_plot(xgb_model, X_test, save_path=OUTPUT_DIR / "shap_summary.png")
 
-    # --- Profitability ---
+    # --- Profitability (deployed strategy: EV > EV_THRESHOLD, ALLOWED_OUTCOMES only) ---
     odds_h = test_df["odds_home"].values.astype(float)
     odds_d = test_df["odds_draw"].values.astype(float)
     odds_a = test_df["odds_away"].values.astype(float)
 
-    model_bets = _value_bets(proba, odds_h, odds_d, odds_a, y_test)
+    model_bets = _value_bets(proba, odds_h, odds_d, odds_a, y_test,
+                             threshold=EV_THRESHOLD)
+    model_bets = model_bets[model_bets["outcome"].isin(ALLOWED_OUTCOMES)]
     model_summary = _profitability_summary(model_bets, "Model value bets")
     baseline_summary = _naive_baseline_roi(odds_h, odds_d, odds_a, y_test)
+
+    _pnl_curve_plot(model_bets, test_df, OUTPUT_DIR / "pnl_curve.png")
 
     logger.info(f"\n=== Profitability (EV threshold {EV_THRESHOLD}) ===")
     for k, v in model_summary.items():
@@ -328,6 +498,31 @@ def run_evaluation(
     logger.info(f"\n=== Baseline ===")
     for k, v in baseline_summary.items():
         logger.info(f"  {k}: {v}")
+
+    # --- Threshold sweep ---
+    sweep_all = _threshold_sweep(proba, odds_h, odds_d, odds_a, y_test)
+    sweep_ha  = _threshold_sweep(proba, odds_h, odds_d, odds_a, y_test,
+                                 outcomes=["home", "away"])
+
+    logger.info("\n=== Threshold sweep — All outcomes ===")
+    logger.info(f"  {'EV≥':>6}  {'Bets':>6}  {'ROI%':>8}  {'Sharpe':>8}")
+    for r in sweep_all:
+        roi_str    = f"{r['flat_roi_pct']:+.2f}" if r["flat_roi_pct"] is not None else "  —"
+        sharpe_str = f"{r['kelly_sharpe']:+.3f}" if r["kelly_sharpe"] is not None else "  —"
+        logger.info(f"  {r['ev_threshold']:>6.2f}  {r['n_bets']:>6}  {roi_str:>8}  {sharpe_str:>8}")
+
+    logger.info("\n=== Threshold sweep — Home & Away only ===")
+    logger.info(f"  {'EV≥':>6}  {'Bets':>6}  {'ROI%':>8}  {'Sharpe':>8}")
+    for r in sweep_ha:
+        roi_str    = f"{r['flat_roi_pct']:+.2f}" if r["flat_roi_pct"] is not None else "  —"
+        sharpe_str = f"{r['kelly_sharpe']:+.3f}" if r["kelly_sharpe"] is not None else "  —"
+        logger.info(f"  {r['ev_threshold']:>6.2f}  {r['n_bets']:>6}  {roi_str:>8}  {sharpe_str:>8}")
+
+    _sweep_plot(sweep_all, sweep_ha, OUTPUT_DIR / "threshold_sweep.png")
+
+    with open(OUTPUT_DIR / "threshold_sweep.json", "w") as f:
+        json.dump({"all_outcomes": sweep_all, "home_away_only": sweep_ha}, f, indent=2)
+    logger.info(f"Threshold sweep saved to {OUTPUT_DIR / 'threshold_sweep.json'}")
 
     report = {
         "test_set": {
@@ -352,9 +547,14 @@ def run_evaluation(
             "confusion_matrix": cm.tolist(),
         },
         "profitability": {
-            "ev_threshold": EV_THRESHOLD,
-            "model": model_summary,
+            "ev_threshold":     EV_THRESHOLD,
+            "allowed_outcomes": sorted(list(ALLOWED_OUTCOMES)),
+            "model":            model_summary,
             "baseline_favourite": baseline_summary,
+        },
+        "threshold_sweep": {
+            "all_outcomes":    sweep_all,
+            "home_away_only":  sweep_ha,
         },
     }
 
@@ -400,6 +600,10 @@ def _write_website_json(report: dict) -> None:
         "accuracy": clf.get("accuracy"),
         "precision": clf.get("precision", {"home": None, "draw": None, "away": None}),
         "recall":    clf.get("recall",    {"home": None, "draw": None, "away": None}),
+        "strategy": {
+            "ev_threshold":     report["profitability"]["ev_threshold"],
+            "allowed_outcomes": sorted(list(ALLOWED_OUTCOMES)),
+        },
         "gambling": {
             "value_bet_threshold": report["profitability"]["ev_threshold"],
             "flat_roi_pct": prof.get("flat_roi_pct"),
