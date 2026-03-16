@@ -85,10 +85,17 @@ foreach ($f in $filesToCopy) {
     $dst = Join-Path $SITE_DIR $f.Dst
     if (Test-Path $src) {
         New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
-        # Remove destination first to avoid Windows file-lock errors on PNGs
-        if (Test-Path $dst) { Remove-Item $dst -Force -ErrorAction SilentlyContinue }
-        Copy-Item $src $dst
-        Log "  Copied $($f.Src) -> $($f.Dst)"
+        if (Test-Path $dst) {
+            # Grant current user full control (handles files created by other processes/accounts)
+            icacls $dst /grant "${env:USERNAME}:(F)" /Q 2>&1 | Out-Null
+            Remove-Item $dst -Force -ErrorAction SilentlyContinue
+        }
+        try {
+            Copy-Item $src $dst -ErrorAction Stop
+            Log "  Copied $($f.Src) -> $($f.Dst)"
+        } catch {
+            Log "  WARNING: Could not copy $($f.Src) - $($_.Exception.Message)"
+        }
     } else {
         Log "  WARNING: $src not found - skipping"
     }
