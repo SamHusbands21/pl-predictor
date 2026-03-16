@@ -1,18 +1,8 @@
 """
 Scrape xG per match from understat.com for Premier League seasons.
 
-Scrapes directly via requests + BeautifulSoup.
-Understat embeds match data as JSON inside <script> tags on each league page.
-
-IP blocking note
-----------------
-GitHub Actions runners use Azure cloud IPs that understat.com blocks.
-Set the SCRAPERAPI_KEY environment variable (from scraperapi.com, free tier
-gives 5,000 credits/month — we use ~20/month) to route requests through
-ScraperAPI's residential proxies, which bypass the block.
-
-Without SCRAPERAPI_KEY the scraper makes direct requests (works from any
-non-blocked IP, e.g. a local dev machine).
+Uses the AJAX endpoint /getLeagueData/EPL/{year} (Understat's new architecture
+as of Dec 2024). Works from residential IPs; no ScraperAPI needed.
 
 Coverage starts at 2014/15; current season always re-fetched.
 """
@@ -21,16 +11,15 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import re
 import time
 from datetime import date
 from pathlib import Path
-from urllib.parse import quote
 
 import pandas as pd
 import requests
-from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -70,44 +59,30 @@ def _all_years() -> list[int]:
     return list(range(2014, _current_year() + 1))
 
 
-def _scraperapi_url(target_url: str) -> str:
-    """
-    Wrap a URL with ScraperAPI if SCRAPERAPI_KEY is set.
-    ScraperAPI routes requests through residential proxies that bypass
-    understat's Azure IP block.
-    """
-    api_key = os.environ.get("SCRAPERAPI_KEY", "").strip()
-    if api_key:
-        return f"https://api.scraperapi.com?api_key={api_key}&url={quote(target_url)}"
-    return target_url
-
-
 def _fetch_season(year: int, retries: int = 4) -> list[dict]:
-    """Fetch raw match JSON for one understat season (year = start year)."""
-    target = f"https://understat.com/league/EPL/{year}"
-    url = _scraperapi_url(target)
+    """
+    Fetch raw match JSON for one understat season (year = start year).
+
+    Uses the AJAX endpoint /getLeagueData/EPL/{year} (Understat's new
+    architecture as of Dec 2024). Returns same format as legacy datesData.
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "X-Requested-With": "XMLHttpRequest",
+        "Referer": f"https://understat.com/league/EPL/{year}",
+    }
+    url = f"https://understat.com/getLeagueData/EPL/{year}"
 
     for attempt in range(retries):
         try:
-            resp = requests.get(
-                url,
-                timeout=60,
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
-            )
+            resp = requests.get(url, headers=headers, timeout=60)
             resp.raise_for_status()
-            soup = BeautifulSoup(resp.content, "html.parser")
-            for script in soup.find_all("script"):
-                if not script.string or "datesData" not in script.string:
-                    continue
-                m = re.search(
-                    r'datesData\s*=\s*JSON\.parse\(\'(.*?)\'\)',
-                    script.string,
-                    re.DOTALL,
-                )
-                if m:
-                    raw = m.group(1).replace("\\'", "'")
-                    return json.loads(raw)
-            logger.warning(f"  No datesData found for {year} (page may be a bot-detection page)")
+            data = resp.json()
+            if isinstance(data, dict) and "dates" in data:
+                dates = data["dates"]
+                if isinstance(dates, list) and dates:
+                    logger.info(f"  Fetched {len(dates)} matches via AJAX for {year}")
+                    return dates
             return []
         except Exception as exc:
             logger.warning(f"  Attempt {attempt + 1}/{retries} failed for {year}: {exc}")
@@ -170,11 +145,6 @@ def download_all(years: list[int] | None = None, force_current: bool = True) -> 
                 matches = json.load(f)
         else:
             logger.info(f"  Fetching understat {year}/{year + 1}...")
-            if is_current and not os.environ.get("SCRAPERAPI_KEY"):
-                logger.warning(
-                    "  SCRAPERAPI_KEY not set — direct request may fail on CI. "
-                    "Sign up free at scraperapi.com and add the key as a GitHub Secret."
-                )
             matches = _fetch_season(year)
             if matches:
                 with open(cache_path, "w") as f:
@@ -190,8 +160,7 @@ def download_all(years: list[int] | None = None, force_current: bool = True) -> 
     if not frames:
         raise RuntimeError(
             "No understat xG data available. "
-            "If on CI, set SCRAPERAPI_KEY (free at scraperapi.com). "
-            "Locally, make sure understat.com is accessible from your IP."
+            "Check that understat.com is accessible from your network."
         )
 
     combined = pd.concat(frames, ignore_index=True)
