@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 if __name__ == "__main__":
     logger.info("Testing Betfair API connection...")
     try:
-        fixtures = get_upcoming_epl_fixtures(days_ahead=14)
+        fixtures = get_upcoming_epl_fixtures(days_ahead=30)
         if fixtures:
             logger.info(f"\nFound {len(fixtures)} upcoming EPL fixtures:")
             for f in fixtures:

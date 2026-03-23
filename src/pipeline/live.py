@@ -188,7 +188,7 @@ def _value_bets_for_fixture(
     return sorted(bets, key=lambda x: x["ev"], reverse=True)
 
 
-def run_pipeline(days_ahead: int = 7) -> None:
+def run_pipeline(days_ahead: int = 30) -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     logger.info("Loading historical data...")

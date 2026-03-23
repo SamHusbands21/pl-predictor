@@ -54,7 +54,7 @@ def _get_client():
     return client
 
 
-def get_upcoming_epl_fixtures(days_ahead: int = 7) -> list[dict]:
+def get_upcoming_epl_fixtures(days_ahead: int = 30) -> list[dict]:
     """
     Return upcoming EPL fixtures with best back odds from the Exchange.
 
@@ -164,7 +164,7 @@ def get_upcoming_epl_fixtures(days_ahead: int = 7) -> list[dict]:
     return fixtures
 
 
-def get_upcoming_fixtures_fotmob(days_ahead: int = 7) -> list[dict]:
+def get_upcoming_fixtures_fotmob(days_ahead: int = 30) -> list[dict]:
     """
     Fallback fixture source using the Fotmob public API.
 
@@ -235,6 +235,6 @@ def get_upcoming_fixtures_fotmob(days_ahead: int = 7) -> list[dict]:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    fixtures = get_upcoming_epl_fixtures(days_ahead=7)
+    fixtures = get_upcoming_epl_fixtures(days_ahead=30)
     for f in fixtures:
         print(f)
