@@ -55,6 +55,7 @@ $diff = git diff --cached --name-only
 if ($diff) {
     $date = Get-Date -Format "yyyy-MM-dd"
     git commit -m "chore: update betting recommendations [$date]"
+    git pull --rebase
     git push
     Log "Pushed to GitHub."
 } else {
