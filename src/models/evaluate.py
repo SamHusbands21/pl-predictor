@@ -47,6 +47,7 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
+from src.features.display_names import FEATURE_DISPLAY_NAMES
 from src.features.engineer import MODEL_FEATURES
 from src.models.train import TEST_SEASONS, _load_features, _split, _ensemble_proba
 
@@ -56,32 +57,6 @@ OUTPUT_DIR = Path(__file__).parents[2] / "output"
 EV_THRESHOLD = 1.25          # bet when model_prob × odds > this
 ALLOWED_OUTCOMES = {"home", "away"}  # draw excluded — near-zero recall destroys ROI
 MAX_KELLY = 0.25             # cap Kelly fraction
-
-# Human-readable names for every model feature (used in SHAP plot labels)
-FEATURE_DISPLAY_NAMES: dict[str, str] = {
-    "elo_home":          "Home Elo rating",
-    "elo_away":          "Away Elo rating",
-    "elo_diff":          "Elo difference (Home − Away)",
-    "xg_elo_home":       "Home xG-Elo rating",
-    "xg_elo_away":       "Away xG-Elo rating",
-    "xg_elo_diff":       "xG-Elo difference (Home − Away)",
-    "home_ppg_5":        "Home pts/game (last 5)",
-    "home_ppg_10":       "Home pts/game (last 10)",
-    "away_ppg_5":        "Away pts/game (last 5)",
-    "away_ppg_10":       "Away pts/game (last 10)",
-    "home_xgf_5":        "Home xG for (last 5)",
-    "home_xga_5":        "Home xG against (last 5)",
-    "away_xgf_5":        "Away xG for (last 5)",
-    "away_xga_5":        "Away xG against (last 5)",
-    "home_gf_5":         "Home goals for (last 5)",
-    "home_ga_5":         "Home goals against (last 5)",
-    "away_gf_5":         "Away goals for (last 5)",
-    "away_ga_5":         "Away goals against (last 5)",
-    "home_days_rest":    "Home days since last match",
-    "away_days_rest":    "Away days since last match",
-    "h2h_home_win_rate": "H2H home win rate (last 5 meetings)",
-    "home_advantage":    "Home advantage",
-}
 
 DISPLAY_NAMES = [FEATURE_DISPLAY_NAMES.get(f, f) for f in MODEL_FEATURES]
 
