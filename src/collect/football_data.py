@@ -64,20 +64,51 @@ def _download_season(season_code: str, retries: int = 3) -> pd.DataFrame:
     raise RuntimeError(f"Failed to download season {season_code} after {retries} retries")
 
 
-def download_all(seasons: list[str] = SEASONS, force: bool = False) -> pd.DataFrame:
-    """Download all seasons, cache to CSV, return combined DataFrame."""
+def download_all(
+    seasons: list[str] = SEASONS,
+    force: bool = False,
+    force_current: bool = False,
+) -> pd.DataFrame:
+    """
+    Download all seasons, cache to CSV, return combined DataFrame.
+
+    Parameters
+    ----------
+    force : always re-download every season.
+    force_current : only re-download the last (current) season — older season
+        CSVs on football-data.co.uk are immutable, so caching them is fine, but
+        the current-season file grows every weekend and must be refreshed for
+        Elo / rolling form to stay live. Falls back to the cached copy if the
+        network request fails, so a flaky connection can't break the pipeline.
+    """
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     frames = []
+    current_season = seasons[-1] if seasons else None
 
     for season_code in seasons:
         cache_path = RAW_DIR / f"E0_{season_code}.csv"
-        if cache_path.exists() and not force:
+        refresh = force or (force_current and season_code == current_season)
+        needs_fetch = refresh or not cache_path.exists()
+
+        if needs_fetch:
+            try:
+                logger.info(
+                    f"  {'Refreshing' if refresh else 'Downloading'} season {season_code}..."
+                )
+                df = _download_season(season_code)
+                df.to_csv(cache_path, index=False)
+            except Exception as exc:
+                if cache_path.exists():
+                    logger.warning(
+                        f"  Fetch failed for {season_code} ({exc}); "
+                        f"using cached {cache_path.name}."
+                    )
+                    df = pd.read_csv(cache_path, parse_dates=["Date"])
+                else:
+                    raise
+        else:
             logger.info(f"  Using cached {cache_path.name}")
             df = pd.read_csv(cache_path, parse_dates=["Date"])
-        else:
-            logger.info(f"  Downloading season {season_code}...")
-            df = _download_season(season_code)
-            df.to_csv(cache_path, index=False)
         frames.append(df)
 
     combined = pd.concat(frames, ignore_index=True)

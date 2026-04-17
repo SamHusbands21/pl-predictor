@@ -310,8 +310,14 @@ def _value_bets_for_fixture(
 def run_pipeline(days_ahead: int = 30) -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    logger.info("Loading historical data...")
-    hist_df = download_fd()  # downloads any missing seasons, uses cache otherwise
+    logger.info("Loading historical data (refreshing current season)...")
+    try:
+        hist_df = download_fd(force_current=True)
+    except Exception as exc:
+        logger.warning(
+            f"Current-season refresh failed ({exc}); falling back to cached data."
+        )
+        hist_df = download_fd()
 
     logger.info("Fetching understat xG data (current season refreshed)...")
     try:
