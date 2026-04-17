@@ -39,6 +39,7 @@ from src.features.display_names import FEATURE_DISPLAY_NAMES
 from src.features.elo import EloSystem
 from src.features.xg_elo import XgEloSystem
 from src.features.engineer import MODEL_FEATURES, _rolling_team_stats, _h2h_win_rate
+from src.features.team_names import canonical_team_name
 from src.models.train import load_models, _ensemble_proba
 
 logger = logging.getLogger(__name__)
@@ -310,14 +311,8 @@ def _value_bets_for_fixture(
 def run_pipeline(days_ahead: int = 30) -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    logger.info("Loading historical data (refreshing current season)...")
-    try:
-        hist_df = download_fd(force_current=True)
-    except Exception as exc:
-        logger.warning(
-            f"Current-season refresh failed ({exc}); falling back to cached data."
-        )
-        hist_df = download_fd()
+    logger.info("Loading historical data...")
+    hist_df = download_fd()  # downloads any missing seasons, uses cache otherwise
 
     logger.info("Fetching understat xG data (current season refreshed)...")
     try:
@@ -370,6 +365,13 @@ def run_pipeline(days_ahead: int = 30) -> None:
 
     for fixture in fixtures:
         try:
+            # Defensive: even if a collector forgets to canonicalise, make sure
+            # fixture["home"]/["away"] match historical naming before lookups.
+            fixture = {
+                **fixture,
+                "home": canonical_team_name(fixture.get("home")),
+                "away": canonical_team_name(fixture.get("away")),
+            }
             features = _build_fixture_features(
                 fixture, elo_ratings, xg_elo_ratings, hist, hist_with_stats
             )

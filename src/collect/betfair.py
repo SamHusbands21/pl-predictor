@@ -21,6 +21,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from src.features.team_names import canonical_team_name
+
 load_dotenv()
 logger = logging.getLogger(__name__)
 
@@ -140,9 +142,15 @@ def get_upcoming_epl_fixtures(days_ahead: int = 30) -> list[dict]:
             home_name, away_name = non_draw[0], non_draw[1]
 
         try:
+            # Betfair's runner names don't always match football-data's spelling
+            # (e.g. "Man Utd" vs "Man United"); canonicalise so downstream Elo /
+            # form lookups actually hit.
+            home_canonical = canonical_team_name(home_name)
+            away_canonical = canonical_team_name(away_name)
+
             fixture = {
-                "home": home_name,
-                "away": away_name,
+                "home": home_canonical,
+                "away": away_canonical,
                 "date": cat.market_start_time,
                 "betfair_odds": {
                     "home": odds.get(home_name),
@@ -153,7 +161,7 @@ def get_upcoming_epl_fixtures(days_ahead: int = 30) -> list[dict]:
             }
             fixtures.append(fixture)
             logger.info(
-                f"  {home_name} vs {away_name} | "
+                f"  {home_canonical} vs {away_canonical} | "
                 f"H:{odds.get(home_name)} D:{odds.get(draw_name)} A:{odds.get(away_name)}"
             )
         except Exception as exc:
@@ -176,10 +184,6 @@ def get_upcoming_fixtures_fotmob(days_ahead: int = 30) -> list[dict]:
     """
     import requests
 
-    FOTMOB_TEAM_MAP: dict[str, str] = {
-        "Man Utd":       "Man United",
-        "Sheffield Utd": "Sheffield United",
-    }
 
     try:
         resp = requests.get(
@@ -216,8 +220,8 @@ def get_upcoming_fixtures_fotmob(days_ahead: int = 30) -> list[dict]:
 
         home_short = m.get("home", {}).get("shortName", "")
         away_short = m.get("away", {}).get("shortName", "")
-        home = FOTMOB_TEAM_MAP.get(home_short, home_short)
-        away = FOTMOB_TEAM_MAP.get(away_short, away_short)
+        home = canonical_team_name(home_short)
+        away = canonical_team_name(away_short)
         if not home or not away:
             continue
 
