@@ -17,9 +17,9 @@ Place your Betfair Exchange API SSL certificates here:
 Set these in `.env` (copy from `.env.example`):
 
 ```
-BETFAIR_USERNAME=REDACTED_EMAIL
-BETFAIR_PASSWORD=REDACTED_PASSWORD
-BETFAIR_APP_KEY=REDACTED_APP_KEY
+BETFAIR_USERNAME=your_username
+BETFAIR_PASSWORD=your_password
+BETFAIR_APP_KEY=your_app_key
 BETFAIR_CERT_PATH=certs/client-2048.crt
 BETFAIR_KEY_PATH=certs/client-2048.key
 ```
