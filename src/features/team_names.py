@@ -38,6 +38,7 @@ TEAM_NAME_ALIASES: dict[str, str] = {
     "Cardiff City":         "Cardiff",
     "Stoke City":           "Stoke",
     "Hull City":            "Hull",
+    "Coventry City":        "Coventry",
     "Huddersfield Town":    "Huddersfield",
     "Brighton & Hove Albion": "Brighton",
     "Brighton and Hove Albion": "Brighton",

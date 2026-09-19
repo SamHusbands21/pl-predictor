@@ -16,6 +16,7 @@ How to obtain API access:
 
 import logging
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -45,15 +46,23 @@ def _get_client():
     # betfairlightweight expects a directory path and scans it for .crt/.key files
     certs_dir = str(Path(__file__).parents[2] / "certs")
 
-    client = bfl.APIClient(
-        username=username,
-        password=password,
-        app_key=app_key,
-        certs=certs_dir,
-    )
-    client.login()
-    logger.info("Betfair login successful")
-    return client
+    last_exc = None
+    for attempt in range(1, 4):
+        try:
+            client = bfl.APIClient(
+                username=username,
+                password=password,
+                app_key=app_key,
+                certs=certs_dir,
+            )
+            client.login()
+            logger.info("Betfair login successful")
+            return client
+        except Exception as exc:
+            last_exc = exc
+            logger.warning(f"Betfair login attempt {attempt}/3 failed: {exc}")
+            time.sleep(2 ** attempt)
+    raise last_exc
 
 
 def get_upcoming_epl_fixtures(days_ahead: int = 30) -> list[dict]:

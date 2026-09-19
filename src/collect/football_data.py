@@ -8,9 +8,12 @@ Seasons available from 1993/94 onward; we collect from 2014/15 to align
 with understat xG coverage.
 """
 
+from __future__ import annotations
+
 import io
 import time
 import logging
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -20,12 +23,28 @@ logger = logging.getLogger(__name__)
 
 RAW_DIR = Path(__file__).parents[2] / "data" / "raw" / "football_data"
 BASE_URL = "https://www.football-data.co.uk/mmz4281"
+FIRST_SEASON_START = 2014
+
+
+def _current_year() -> int:
+    """Return the start year of the currently active PL season."""
+    today = date.today()
+    # PL runs Aug–May; from July onward we're in the new season
+    return today.year if today.month >= 7 else today.year - 1
+
+
+def _season_code(year_start: int) -> str:
+    """football-data.co.uk uses YYZZ, e.g. 1415 for 2014/15."""
+    return f"{year_start % 100:02d}{(year_start + 1) % 100:02d}"
+
+
+def _all_seasons() -> list[str]:
+    """Season codes from 2014/15 through the current season."""
+    return [_season_code(year) for year in range(FIRST_SEASON_START, _current_year() + 1)]
+
 
 # Season codes: football-data.co.uk uses YYZZ format e.g. 1415 for 2014/15
-SEASONS = [
-    "1415", "1516", "1617", "1718", "1819",
-    "1920", "2021", "2122", "2223", "2324", "2425", "2526",
-]
+SEASONS = _all_seasons()
 
 COLS_KEEP = [
     "Div", "Date", "HomeTeam", "AwayTeam",
@@ -65,7 +84,7 @@ def _download_season(season_code: str, retries: int = 3) -> pd.DataFrame:
 
 
 def download_all(
-    seasons: list[str] = SEASONS,
+    seasons: list[str] | None = None,
     force: bool = False,
     force_current: bool = False,
 ) -> pd.DataFrame:
@@ -74,13 +93,20 @@ def download_all(
 
     Parameters
     ----------
+    seasons : season codes to collect. Defaults to 2014/15 through the
+        currently active season (July rollover).
     force : always re-download every season.
     force_current : only re-download the last (current) season — older season
         CSVs on football-data.co.uk are immutable, so caching them is fine, but
         the current-season file grows every weekend and must be refreshed for
         Elo / rolling form to stay live. Falls back to the cached copy if the
         network request fails, so a flaky connection can't break the pipeline.
+        A brand-new season with no cache yet is skipped (Understat gap-fill
+        covers those results) rather than aborting the pipeline.
     """
+    if seasons is None:
+        seasons = _all_seasons()
+
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     frames = []
     current_season = seasons[-1] if seasons else None
@@ -104,6 +130,11 @@ def download_all(
                         f"using cached {cache_path.name}."
                     )
                     df = pd.read_csv(cache_path, parse_dates=["Date"])
+                elif season_code == current_season:
+                    logger.warning(
+                        f"  Current season {season_code} not available yet ({exc}); skipping."
+                    )
+                    continue
                 else:
                     raise
         else:

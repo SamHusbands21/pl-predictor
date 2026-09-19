@@ -51,7 +51,7 @@ MAX_KELLY = 0.25
 
 OUTCOME_NAMES = ["home", "draw", "away"]
 SHAP_TOP_N = 10
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _get_current_elo_ratings(
@@ -102,21 +102,109 @@ def _prepare_hist_with_xg(
     return hist
 
 
-def _last_n_results(hist: pd.DataFrame, team: str, n: int = 5) -> list[str]:
+def _as_naive(value) -> pd.Timestamp:
+    """Parse a datetime and drop timezone so rest-day diffs stay numeric."""
+    ts = pd.to_datetime(value)
+    if getattr(ts, "tz", None) is not None:
+        ts = ts.tz_convert("UTC").tz_localize(None)
+    return ts
+
+
+def _append_understat_results(hist_df: pd.DataFrame, xg_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Return the most recent n results for a team as W/D/L codes (newest first),
-    taken from both home and away appearances in `hist`.
+    Append completed Understat matches that are missing from football-data.
+
+    football-data's current-season CSV can lag (or be unpublished at the start
+    of a new season). Understat already has those results with scores, so we
+    map goals → FTHG/FTAG/FTR and stitch them on for Elo, rest days, and form.
     """
-    home_rows = hist.loc[hist["home_team"] == team, ["date", "FTR"]].copy()
-    home_rows["code"] = home_rows["FTR"].map({"H": "W", "D": "D", "A": "L"})
-    away_rows = hist.loc[hist["away_team"] == team, ["date", "FTR"]].copy()
-    away_rows["code"] = away_rows["FTR"].map({"H": "L", "D": "D", "A": "W"})
-    combined = pd.concat(
-        [home_rows[["date", "code"]], away_rows[["date", "code"]]],
-        ignore_index=True,
-    ).dropna(subset=["code"])
-    combined = combined.sort_values("date", ascending=False)
-    return combined["code"].head(n).tolist()
+    if xg_df is None or xg_df.empty:
+        return hist_df
+    if "goals_home" not in xg_df.columns or "goals_away" not in xg_df.columns:
+        return hist_df
+
+    hist = hist_df.copy()
+    hist["Date"] = hist["Date"].map(_as_naive).map(lambda ts: ts.normalize())
+    cutoff = hist["Date"].max()
+    existing = set(zip(
+        hist["Date"],
+        hist["HomeTeam"],
+        hist["AwayTeam"],
+    ))
+
+    extra_rows = []
+    for _, row in xg_df.iterrows():
+        match_date = _as_naive(row["date"]).normalize()
+        # Only fill forward. Older Understat rows can fail the key match
+        # because of team-name drift and would otherwise double-count Elo.
+        if pd.notna(cutoff) and match_date < cutoff:
+            continue
+        key = (match_date, row["home_team"], row["away_team"])
+        if key in existing:
+            continue
+        goals_home, goals_away = row.get("goals_home"), row.get("goals_away")
+        if pd.isna(goals_home) or pd.isna(goals_away):
+            continue
+        goals_home, goals_away = int(goals_home), int(goals_away)
+        result = "H" if goals_home > goals_away else ("A" if goals_away > goals_home else "D")
+        extra_rows.append({
+            "Date": match_date,
+            "HomeTeam": row["home_team"],
+            "AwayTeam": row["away_team"],
+            "FTHG": goals_home,
+            "FTAG": goals_away,
+            "FTR": result,
+        })
+
+    if not extra_rows:
+        return hist
+
+    extra = pd.DataFrame(extra_rows)
+    logger.info(f"  Appended {len(extra)} Understat results missing from football-data.")
+    combined = pd.concat([hist, extra], ignore_index=True)
+    return combined.sort_values("Date").reset_index(drop=True)
+
+
+def _last_n_matches(hist: pd.DataFrame, team: str, n: int = 5) -> list[dict]:
+    """
+    Return the most recent n matches for a team (newest first) with result,
+    opponent, venue, and score. Taken from both home and away appearances.
+    """
+    home_rows = hist.loc[
+        hist["home_team"] == team, ["date", "away_team", "FTR", "FTHG", "FTAG"]
+    ].copy()
+    home_rows["result"] = home_rows["FTR"].map({"H": "W", "D": "D", "A": "L"})
+    home_rows["opponent"] = home_rows["away_team"]
+    home_rows["venue"] = "home"
+    home_rows["goals_for"] = home_rows["FTHG"]
+    home_rows["goals_against"] = home_rows["FTAG"]
+
+    away_rows = hist.loc[
+        hist["away_team"] == team, ["date", "home_team", "FTR", "FTHG", "FTAG"]
+    ].copy()
+    away_rows["result"] = away_rows["FTR"].map({"H": "L", "D": "D", "A": "W"})
+    away_rows["opponent"] = away_rows["home_team"]
+    away_rows["venue"] = "away"
+    away_rows["goals_for"] = away_rows["FTAG"]
+    away_rows["goals_against"] = away_rows["FTHG"]
+
+    cols = ["date", "result", "opponent", "venue", "goals_for", "goals_against"]
+    combined = pd.concat([home_rows[cols], away_rows[cols]], ignore_index=True)
+    combined = combined.dropna(subset=["result"]).sort_values("date", ascending=False).head(n)
+
+    matches = []
+    for _, row in combined.iterrows():
+        goals_for = None if pd.isna(row["goals_for"]) else int(row["goals_for"])
+        goals_against = None if pd.isna(row["goals_against"]) else int(row["goals_against"])
+        matches.append({
+            "result": row["result"],
+            "date": _as_naive(row["date"]).strftime("%Y-%m-%d"),
+            "opponent": row["opponent"],
+            "venue": row["venue"],
+            "goals_for": goals_for,
+            "goals_against": goals_against,
+        })
+    return matches
 
 
 def _build_fixture_features(
@@ -144,13 +232,17 @@ def _build_fixture_features(
             return 0.0
         return float(rows.iloc[-1].get(stat, 0.0) or 0.0)
 
-    def days_rest(team_col: str, team: str) -> float:
-        rows = hist_with_stats[hist_with_stats[team_col] == team]
+    def days_rest(team: str) -> float:
+        mask = (
+            (hist_with_stats["home_team"] == team)
+            | (hist_with_stats["away_team"] == team)
+        )
+        rows = hist_with_stats.loc[mask]
         if rows.empty:
             return 7.0
-        last_date = rows.iloc[-1]["date"]
-        fix_date = pd.to_datetime(fixture["date"]).tz_localize(None)
-        return min(float((fix_date - last_date).days), 30.0)
+        last_date = _as_naive(rows["date"].max())
+        fix_date = _as_naive(fixture["date"])
+        return min(float((fix_date.normalize() - last_date.normalize()).days), 30.0)
 
     # H2H win rate from recent meetings (in historical data only)
     h2h_mask = (
@@ -188,8 +280,8 @@ def _build_fixture_features(
         "home_ga_5": last_stat("home_team", home, "home_ga_5"),
         "away_gf_5": last_stat("away_team", away, "away_gf_5"),
         "away_ga_5": last_stat("away_team", away, "away_ga_5"),
-        "home_days_rest": days_rest("home_team", home),
-        "away_days_rest": days_rest("away_team", away),
+        "home_days_rest": days_rest(home),
+        "away_days_rest": days_rest(away),
         "h2h_home_win_rate": h2h_rate,
         "home_advantage": 1,
     }
@@ -206,6 +298,7 @@ def _build_fixture_context(
     under an expanded fixture tile on the website.
     """
     def team_block(prefix: str, team: str) -> dict:
+        matches = _last_n_matches(hist, team, 5)
         return {
             "elo":    round(float(features[f"elo_{prefix}"]), 1),
             "xg_elo": round(float(features[f"xg_elo_{prefix}"]), 1),
@@ -215,7 +308,8 @@ def _build_fixture_context(
             "xga_5":  round(float(features[f"{prefix}_xga_5"]), 2),
             "gf_5":   round(float(features[f"{prefix}_gf_5"]), 2),
             "ga_5":   round(float(features[f"{prefix}_ga_5"]), 2),
-            "last5":  _last_n_results(hist, team, 5),
+            "last5":  [m["result"] for m in matches],
+            "recent_matches": matches,
         }
 
     return {
@@ -312,7 +406,7 @@ def run_pipeline(days_ahead: int = 30) -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     logger.info("Loading historical data...")
-    hist_df = download_fd()  # downloads any missing seasons, uses cache otherwise
+    hist_df = download_fd(force_current=True)
 
     logger.info("Fetching understat xG data (current season refreshed)...")
     try:
@@ -320,6 +414,8 @@ def run_pipeline(days_ahead: int = 30) -> None:
     except Exception as exc:
         logger.warning(f"Understat xG fetch failed ({exc}); xG-Elo will use zeros.")
         xg_df = pd.DataFrame(columns=["date", "home_team", "away_team", "xg_home", "xg_away"])
+
+    hist_df = _append_understat_results(hist_df, xg_df)
 
     logger.info("Building current Elo ratings...")
     elo_ratings, xg_elo_ratings = _get_current_elo_ratings(hist_df, xg_df)
@@ -348,6 +444,40 @@ def run_pipeline(days_ahead: int = 30) -> None:
             "falling back to Fotmob for fixtures (odds will be unavailable)."
         )
         fixtures = get_upcoming_fixtures_fotmob(days_ahead=days_ahead)
+
+    if not fixtures:
+        existing_path = OUTPUT_DIR / "recommendations.json"
+        try:
+            with open(existing_path) as f:
+                existing = json.load(f)
+            reused = []
+            now = datetime.now(timezone.utc)
+            for rec in existing.get("fixtures", []):
+                date_val = rec.get("date")
+                try:
+                    match_time = datetime.fromisoformat(str(date_val).replace("Z", "+00:00"))
+                    if match_time.tzinfo is None:
+                        match_time = match_time.replace(tzinfo=timezone.utc)
+                    if match_time < now:
+                        continue
+                except (TypeError, ValueError):
+                    pass
+                reused.append({
+                    "home": rec["home"],
+                    "away": rec["away"],
+                    "date": rec["date"],
+                    "betfair_odds": rec.get("betfair_odds") or {
+                        "home": None, "draw": None, "away": None
+                    },
+                })
+            if reused:
+                logger.warning(
+                    f"Live fixture sources unavailable; "
+                    f"reusing {len(reused)} fixtures from {existing_path.name}."
+                )
+                fixtures = reused
+        except Exception as exc:
+            logger.warning(f"Could not reuse existing fixtures ({exc}).")
 
     if not fixtures:
         logger.warning("No upcoming fixtures found. Writing empty recommendations.")
